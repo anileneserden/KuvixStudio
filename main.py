@@ -1,7 +1,8 @@
 import os
 import sys
+import json
 from PyQt6.QtCore import Qt, QDir
-from PyQt6.QtGui import QAction, QKeySequence, QFileSystemModel
+from PyQt6.QtGui import QAction, QKeySequence, QFileSystemModel, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -15,7 +16,9 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QMenu,
     QInputDialog,
-    QTabWidget
+    QTabWidget,
+    QGraphicsView,
+    QGraphicsScene
 )
 
 
@@ -275,7 +278,6 @@ class KuvixStudio(QMainWindow):
             self.load_file_to_tab(file_path)
 
     def load_file_to_tab(self, file_path):
-        # Eğer dosya zaten açıksa, o sekmeye odaklan
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
             if hasattr(widget, "file_path") and widget.file_path == file_path:
@@ -290,20 +292,83 @@ class KuvixStudio(QMainWindow):
             layout = QVBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             
-            editor = QTextEdit(container)
-            editor.setPlainText(content)
-            layout.addWidget(editor)
+            # --- YENİ EKLENTİ: JSON ise Görsel Sekme Oluştur ---
+            if file_path.endswith(".json"):
+                # Hem düzenleyiciyi hem görseli koymak için bir splitter veya tab kullanabiliriz
+                # Şimdilik basitçe editörü koyalım, yanına görsel sekmesi ekleyeceğiz:
+                editor = QTextEdit(container)
+                editor.setPlainText(content)
+                layout.addWidget(editor)
+                
+                # Görsel önizleme sekmesini oluştur
+                self.add_preview_tab(file_path, content)
+            else:
+                editor = QTextEdit(container)
+                editor.setPlainText(content)
+                layout.addWidget(editor)
 
             container.file_path = file_path
-
             tab_name = os.path.basename(file_path)
             tab_index = self.tab_widget.addTab(container, tab_name)
             self.tab_widget.setCurrentIndex(tab_index)
-            self.status_bar.showMessage(f"Açıldı: {file_path}", 3000)
 
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"Dosya açılamadı:\n{e}")
 
+    def add_preview_tab(self, file_path, content):
+        scene = QGraphicsScene()
+        view = QGraphicsView(scene)
+        view.setStyleSheet("background-color: #1e1e1e;") # IDE arka planı ile uyumlu koyu gri
+        
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                window_data = data.get("window", {})
+                win_title = window_data.get("title", "KuvixWindow")
+                win_w = window_data.get("width", 800)
+                win_h = window_data.get("height", 600)
+                
+                # Tuval boyutunu pencereden biraz daha büyük tutalım ki etrafında boşluk kalısın
+                scene.setSceneRect(0, 0, win_w + 100, win_h + 100)
+                
+                # Pencere başlangıç konumu (Ortalamak veya belirli bir boşluk bırakmak için)
+                start_x = 50
+                start_y = 50
+                
+                # 1. Sanal Pencere Arka Planı (Gövde)
+                window_bg = scene.addRect(start_x, start_y, win_w, win_h)
+                window_bg.setBrush(QColor("#2d2d2d"))
+                window_bg.setPen(QColor("#555555"))
+                
+                # 2. Sanal Pencere Başlık Çubuğu
+                title_bar_height = 30
+                title_bar = scene.addRect(start_x, start_y, win_w, title_bar_height)
+                title_bar.setBrush(QColor("#3c3c3c"))
+                title_bar.setPen(QColor("#555555"))
+                
+                # Başlık Metni
+                text_item = scene.addText(win_title)
+                text_item.setDefaultTextColor(QColor("#cccccc"))
+                text_item.setPos(start_x + 10, start_y + 4)
+                
+                # 3. Elements dizisindeki bileşenleri pencere koordinatına göre çiz
+                elements = data.get("elements", [])
+                for elem in elements:
+                    # Eleman koordinatlarını pencerenin içine göre (start_x, start_y + title_bar_height) kaydırıyoruz
+                    x = start_x + elem.get("x", 0)
+                    y = start_y + title_bar_height + elem.get("y", 0)
+                    w = elem.get("width", 100)
+                    h = elem.get("height", 100)
+                    
+                    rect = scene.addRect(x, y, w, h)
+                    rect.setBrush(QColor("#007acc")) # KuvixStudio mavisi
+                    rect.setPen(QColor("#ffffff"))
+                        
+        except Exception as e:
+            print(f"Önizleme yüklenirken hata oluştu: {e}")
+            
+        self.tab_widget.addTab(view, f"Önizleme: {os.path.basename(file_path)}")
+        
     def save_file(self):
         editor = self.get_current_editor()
         current_widget = self.tab_widget.currentWidget()
